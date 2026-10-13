@@ -3,7 +3,7 @@
 所有測試帳號的密碼都是 password123。
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from werkzeug.security import generate_password_hash
 
@@ -50,7 +50,8 @@ def seed(db):
         ).fetchone()
         user_ids[username] = row["id"]
 
-    now = datetime.now().replace(microsecond=0)
+    # 用資料庫的時間（APP_TIMEZONE），不用系統時間：容器的系統時區通常是 UTC
+    now = db.execute("SELECT LOCALTIMESTAMP(0) AS now").fetchone()["now"]
     for (username, title, category, description, found_location, hours_ago,
          storage_location, contact, status) in POSTS:
         db.execute(
