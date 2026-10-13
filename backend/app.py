@@ -466,10 +466,25 @@ def index():
 
 # ---------------------------------------------------------------- CLI
 
+def ensure_utf8_database(db):
+    """資料庫不是 UTF8 就存不了中文；Debian 容器沒設 locale 時預設會建成 SQL_ASCII。"""
+    encoding = db.execute("SHOW server_encoding").fetchone()["server_encoding"]
+    if encoding != "UTF8":
+        name = db.info.dbname
+        raise click.ClickException(
+            f"資料庫 {name} 的編碼是 {encoding}，無法儲存中文，必須是 UTF8。\n"
+            "請刪掉並用 UTF8 重建（裡面的資料會一併刪除）：\n"
+            f'  runuser -u postgres -- psql -c "DROP DATABASE {name};"\n'
+            f'  runuser -u postgres -- psql -c "CREATE DATABASE {name} OWNER {db.info.user} '
+            "ENCODING 'UTF8' LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8' TEMPLATE template0;\""
+        )
+
+
 @app.cli.command("init-db")
 def init_db_command():
     """依 schema.sql 建立資料表（已存在的表不會被動到）。"""
     db = get_db()
+    ensure_utf8_database(db)
     db.execute((BASE_DIR / "schema.sql").read_text(encoding="utf-8"))
     db.commit()
     click.echo("Tables created.")
@@ -482,7 +497,9 @@ def seed_db_command(yes):
     if not yes:
         click.confirm("This deletes ALL users and posts. Continue?", abort=True)
     from seed import seed
-    seed(get_db())
+    db = get_db()
+    ensure_utf8_database(db)
+    seed(db)
     click.echo("Seed data inserted.")
 
 

@@ -51,22 +51,62 @@ Flask + PostgreSQL。API 規格見組內的「校園失物招領系統 API 文�
 
 ## 部署到 PVE 容器（Debian 13）
 
-```bash
-apt install -y python3-venv postgresql git
-sudo -u postgres psql -c "CREATE USER lostfound WITH PASSWORD '你的密碼';"
-sudo -u postgres psql -c "CREATE DATABASE lostfound OWNER lostfound;"
+以 root 在容器主控台執行（PVE 容器通常沒有 `sudo`，所以用 `runuser`）。
 
-cd /opt && git clone https://github.com/nfkgu6630/iforgotthings.git && cd iforgotthings/backend
-python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # 編輯 .env：填密碼、換一組 SECRET_KEY
-flask --app app init-db
-flask --app app seed-db
+1. 安裝套件，確認 PostgreSQL 狀態是 `online`：
 
-gunicorn -w 2 -b 0.0.0.0:5000 app:app
-```
+   ```bash
+   apt install -y python3-venv postgresql git curl
+   pg_lsclusters
+   ```
 
-之後從同網段的瀏覽器打開 `http://<容器 IP>:5000`。
+2. 建立帳號與資料庫。**一定要指定 UTF8**：容器沒設 locale 時，PostgreSQL 預設會建成
+   `SQL_ASCII`，存不了中文（`init-db` 會檢查並提示）。
+
+   ```bash
+   runuser -u postgres -- psql -c "CREATE USER lostfound WITH PASSWORD '你的密碼';"
+   runuser -u postgres -- psql -c "CREATE DATABASE lostfound OWNER lostfound ENCODING 'UTF8' LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8' TEMPLATE template0;"
+   runuser -u postgres -- psql -l   # lostfound 的 Encoding 欄要是 UTF8
+   ```
+
+3. 下載程式碼並安裝 Python 套件：
+
+   ```bash
+   cd /opt && git clone https://github.com/nfkgu6630/iforgotthings.git
+   cd /opt/iforgotthings/backend
+   python3 -m venv .venv && . .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+4. 產生 `.env`（先把 `你的密碼` 換成第 2 步的密碼，再整段貼上）：
+
+   ```bash
+   SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+   cat > .env <<EOF
+   SECRET_KEY=$SECRET
+   DATABASE_URL=postgresql://lostfound:你的密碼@localhost:5432/lostfound
+   APP_TIMEZONE=Asia/Taipei
+   EOF
+   ```
+
+   資料庫放在另一台容器時，把 `localhost` 換成那台的 IP；那台的 PostgreSQL 要設定
+   `listen_addresses` 與 `pg_hba.conf`，允許這台容器連入。
+
+5. 建表、灌測試資料、跑自動測試（應顯示 `33/33 checks passed`）：
+
+   ```bash
+   flask --app app init-db
+   flask --app app seed-db --yes
+   python smoke_test.py
+   ```
+
+6. 啟動：
+
+   ```bash
+   gunicorn -w 2 -b 0.0.0.0:5000 app:app
+   ```
+
+   之後從同網段的瀏覽器打開 `http://<容器 IP>:5000`。
 
 ## 常用指令
 
