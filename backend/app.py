@@ -27,8 +27,14 @@ CATEGORIES = {
     "clothing", "stationery", "bottle_umbrella", "other",
 }
 POST_STATUSES = {"open", "returned"}
-USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 MAX_UPLOAD_MB = 5
+MIN_PASSWORD_LENGTH = 6
+
+# 帳號 = 中央大學學號（9 碼）：入學學年度 3 碼 + 學院 1 碼 + 學制 1 碼 + 系所 1 碼 + 流水號 3 碼
+STUDENT_ID_RE = re.compile(r"^[0-9]{9}$")
+MIN_ENTRY_YEAR = 100  # 民國 100 學年度
+STUDENT_ID_COLLEGES = "12345678"  # 文、理、工、管、資電、地科、客家、生醫理工
+STUDENT_ID_PROGRAMS = "0235"  # 學士、碩士或轉大二、轉大三、博士／在職專班
 
 # 副檔名 → 檔頭特徵，避免把非圖片檔改副檔名後上傳
 IMAGE_SIGNATURES = {
@@ -151,6 +157,32 @@ def datetime_field(data, name):
     return value
 
 
+def current_academic_year():
+    """民國學年度，每年 8 月換新學年度。"""
+    now = datetime.now(ZoneInfo(app.config["APP_TIMEZONE"]))
+    return now.year - 1911 - (1 if now.month < 8 else 0)
+
+
+def validate_student_id(username):
+    if not STUDENT_ID_RE.fullmatch(username):
+        raise ApiError(400, "帳號必須是 9 碼數字的中央大學學號，例如 115423047")
+    year, college, program = int(username[:3]), username[3], username[4]
+    latest = current_academic_year()
+    if not MIN_ENTRY_YEAR <= year <= latest:
+        raise ApiError(400, f"學號前 3 碼（入學學年度）必須介於 {MIN_ENTRY_YEAR} 到 {latest}")
+    if college not in STUDENT_ID_COLLEGES:
+        raise ApiError(400, "學號第 4 碼（學院代碼）必須是 1 到 8")
+    if program not in STUDENT_ID_PROGRAMS:
+        raise ApiError(400, f"學號第 5 碼（學制）必須是 {'、'.join(STUDENT_ID_PROGRAMS)} 其中之一")
+
+
+def password_field(data, name):
+    password = data.get(name)
+    if not isinstance(password, str) or len(password) < MIN_PASSWORD_LENGTH:
+        raise ApiError(400, f"{name} must be at least {MIN_PASSWORD_LENGTH} characters")
+    return password
+
+
 def iso(value):
     return value.isoformat(timespec="seconds") if value else None
 
@@ -197,6 +229,7 @@ def post_summary_out(row):
         "found_at": iso(row["found_at"]),
         "image_url": row["image_url"],
         "status": row["status"],
+        "returned_at": iso(row["returned_at"]),
         "author_name": row["author_name"],
         "created_at": iso(row["created_at"]),
     }
@@ -214,6 +247,7 @@ def post_detail_out(row):
         "contact": row["contact"] or row["author_contact"],
         "image_url": row["image_url"],
         "status": row["status"],
+        "returned_at": iso(row["returned_at"]),
         "author_name": row["author_name"],
         "is_owner": row["user_id"] == current_user_id(),
         "created_at": iso(row["created_at"]),
@@ -247,11 +281,8 @@ def fetch_own_post(post_id):
 def register():
     data = json_body()
     username = text_field(data, "username", required=True)
-    if not USERNAME_RE.fullmatch(username):
-        raise ApiError(400, "username must be 3-20 letters, digits or underscores")
-    password = data.get("password")
-    if not isinstance(password, str) or len(password) < 6:
-        raise ApiError(400, "password must be at least 6 characters")
+    validate_student_id(username)
+    password = password_field(data, "password")
     display_name = text_field(data, "display_name", required=True, max_len=50)
     contact = text_field(data, "contact", required=True, max_len=100)
 
@@ -306,6 +337,39 @@ def me():
     if row is None:
         session.clear()
         raise ApiError(401, "not logged in")
+    return jsonify(user_out(row))
+
+
+@app.put("/api/auth/me")
+@login_required
+def update_me():
+    """修改自己的顯示名稱、聯絡方式或密碼；帳號（學號）不能改，傳了也會忽略。"""
+    data = json_body()
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = %s", (current_user_id(),)).fetchone()
+
+    updates = {}
+    if "display_name" in data:
+        updates["display_name"] = text_field(data, "display_name", required=True, max_len=50)
+    if "contact" in data:
+        updates["contact"] = text_field(data, "contact", required=True, max_len=100)
+    if "new_password" in data:
+        new_password = password_field(data, "new_password")
+        current_password = data.get("current_password")
+        if not isinstance(current_password, str) or not check_password_hash(
+            user["password_hash"], current_password
+        ):
+            raise ApiError(400, "目前密碼不正確")
+        updates["password_hash"] = generate_password_hash(new_password)
+    if not updates:
+        raise ApiError(400, "no editable fields given; allowed: display_name, contact, new_password")
+
+    assignments = ", ".join(f"{name} = %({name})s" for name in updates)
+    row = db.execute(
+        f"UPDATE users SET {assignments} WHERE id = %(id)s RETURNING *",
+        {**updates, "id": user["id"]},
+    ).fetchone()
+    db.commit()
     return jsonify(user_out(row))
 
 
@@ -408,6 +472,12 @@ def update_post(post_id):
         raise ApiError(400, f"no editable fields given; allowed: {', '.join(EDITABLE_POST_FIELDS)}")
 
     assignments = ", ".join(f"{name} = %({name})s" for name in updates)
+    # 歸還時間由後端記錄：標記已歸還的當下寫入，改回待認領就清空；已歸還再存一次不會覆蓋
+    new_status = updates.get("status")
+    if new_status == "returned" and old["status"] != "returned":
+        assignments += ", returned_at = LOCALTIMESTAMP(0)"
+    elif new_status == "open":
+        assignments += ", returned_at = NULL"
     db = get_db()
     db.execute(
         f"UPDATE posts SET {assignments}, updated_at = LOCALTIMESTAMP(0) WHERE id = %(id)s",

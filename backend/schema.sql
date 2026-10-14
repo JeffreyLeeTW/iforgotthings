@@ -24,9 +24,13 @@ CREATE TABLE IF NOT EXISTS posts (
     contact          VARCHAR(100),
     image_url        VARCHAR(500),
     status           VARCHAR(10)  NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'returned')),
+    returned_at      TIMESTAMP,   -- 標記已歸還的時間，待認領時為 NULL
     created_at       TIMESTAMP    NOT NULL DEFAULT LOCALTIMESTAMP(0),
     updated_at       TIMESTAMP    NOT NULL DEFAULT LOCALTIMESTAMP(0)
 );
+
+-- 舊版資料庫補上後來新增的欄位（重複執行不會出錯）
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS returned_at TIMESTAMP;
 
 CREATE INDEX IF NOT EXISTS idx_posts_status_found_at ON posts (status, found_at DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts (user_id);
