@@ -14,8 +14,20 @@ Flask + PostgreSQL。API 規格見組內的「校園失物招領系統 API 文�
 | `smoke_test.py` | 自動測試全部 API（**會清空資料庫**並重灌測試資料） |
 | `uploads/` | 上傳的照片，**備份時要一起備份** |
 
-前端檔案放在 repo 根目錄的 `frontend/` 資料夾，後端會一併提供：`frontend/index.html` 就是首頁，
-前端呼叫 API 一律用相對路徑 `/api/...`。
+## 與 React 前端搭配
+
+前端一律以相對路徑 `/api/...`、`/uploads/...` 呼叫後端，有三種搭配方式：
+
+| 情境 | 做法 |
+| --- | --- |
+| 前端開發 | 在 `frontend/` 用 `npm run dev`，`.env.local` 設 `VITE_DATA_MODE=api`，Vite 會代理到後端 |
+| 前後端同一台容器 | 在 `frontend/` 執行 `npm run build`，後端自動提供 `frontend/dist/`，首頁就是 `http://<容器 IP>:5000` |
+| 前端獨立容器 | 前端容器以 Nginx 提供 `dist/`，並把 `/api/`、`/uploads/` 轉給 `http://10.10.10.111:5000`（見 `frontend/deploy/nginx.conf`） |
+
+後端只提供 build 後的 `frontend/dist/`，不會提供 `frontend/` 的原始碼與設定檔；`dist/` 不存在時首頁回傳 API 狀態訊息。
+
+前端獨立容器時要注意 PVE 防火牆：容器 111 目前只放行來自 `10.10.10.1`（PVE 主機）的 tcp 5000，
+需再新增一條規則，放行來自前端容器 IP 的 tcp 5000。
 
 ## 本機開發（Windows）
 

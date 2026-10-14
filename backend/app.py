@@ -38,8 +38,11 @@ IMAGE_SIGNATURES = {
     ".webp": lambda h: h[:4] == b"RIFF" and h[8:12] == b"WEBP",
 }
 
-# 前端檔案放在 repo 的 frontend/ 資料夾，由 Flask 一併提供，前後端同一個網址
-FRONTEND_DIR = Path(os.environ.get("FRONTEND_DIR", BASE_DIR.parent / "frontend")).resolve()
+# 只提供前端 build 後的 frontend/dist/（npm run build 產生），不提供 frontend/ 原始碼與設定檔；
+# 前端改用獨立容器 + Nginx 部署時，dist/ 不存在，這裡就只提供 API
+FRONTEND_DIR = Path(
+    os.environ.get("FRONTEND_DIR", BASE_DIR.parent / "frontend" / "dist")
+).resolve()
 
 app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 app.config.update(
