@@ -1,3 +1,4 @@
+import { studentIdError } from "./validation";
 export const isDemo = import.meta.env.VITE_DATA_MODE !== "api";
 export const categories = {
   id_card: "證件",
@@ -83,6 +84,7 @@ const seed = [
   art,
   found_at,
   status: i === 7 ? "returned" : "open",
+  returned_at: i === 7 ? "2026-10-11T10:30:00+08:00" : null,
   author_name: "校園拾獲者",
   contact: "示範聯絡方式（非真實資料）",
   storage_location: "請先聯絡拾獲者確認",
@@ -142,6 +144,13 @@ const owned = (id) => {
     throw new ApiError("沒有修改權限。", 403);
   return post;
 };
+const demoPost = (post) => ({
+  ...post,
+  contact_override: post.contact || null,
+  contact: post.contact || accounts.get(post.author_username)?.contact || "",
+  author_name:
+    accounts.get(post.author_username)?.display_name || post.author_name,
+});
 export const api = {
   async me() {
     return isDemo ? user : request("/auth/me");
@@ -149,6 +158,10 @@ export const api = {
   async auth(mode, data) {
     if (!isDemo) return request(`/auth/${mode}`, "POST", data);
     if (mode === "register") {
+      const invalid = studentIdError(data.username);
+      if (invalid) throw new ApiError(invalid, 400);
+      if (!data.password || data.password.length < 6)
+        throw new ApiError("密碼至少需要 6 個字元。", 400);
       if (accounts.has(data.username))
         throw new ApiError("這個帳號已有人使用。", 409);
       accounts.set(data.username, { ...data, id: nextId++ });
@@ -164,6 +177,42 @@ export const api = {
     if (!isDemo) return request("/auth/logout", "POST");
     user = null;
   },
+  async updateProfile(data) {
+    if (!isDemo) return request("/auth/me", "PUT", data);
+    if (!user) throw new ApiError("請先登入。", 401);
+    const account = accounts.get(user.username);
+    const fields = {};
+    for (const [name, max] of [
+      ["display_name", 50],
+      ["contact", 100],
+    ]) {
+      if (name in data) {
+        if (
+          typeof data[name] !== "string" ||
+          !data[name].trim() ||
+          data[name].trim().length > max
+        )
+          throw new ApiError(
+            `請填寫有效的${name === "contact" ? "聯絡方式" : "顯示名稱"}（最多 ${max} 字）。`,
+            400,
+          );
+        fields[name] = data[name].trim();
+      }
+    }
+    if ("new_password" in data) {
+      if (typeof data.new_password !== "string" || data.new_password.length < 6)
+        throw new ApiError("新密碼至少需要 6 個字元。", 400);
+      if (data.current_password !== account.password)
+        throw new ApiError("目前密碼不正確。", 400);
+      fields.password = data.new_password;
+    }
+    if (!Object.keys(fields).length)
+      throw new ApiError("沒有可修改的欄位。", 400);
+    Object.assign(account, fields);
+    const { password, ...safe } = account;
+    user = safe;
+    return user;
+  },
   async list(filters) {
     if (!isDemo) return request(`/posts?${new URLSearchParams(filters)}`);
     let result = posts.filter(
@@ -178,14 +227,16 @@ export const api = {
     );
     return {
       total: result.length,
-      posts: result.sort((a, b) => b.found_at.localeCompare(a.found_at)),
+      posts: result
+        .sort((a, b) => b.found_at.localeCompare(a.found_at))
+        .map(demoPost),
     };
   },
   async detail(id) {
     if (!isDemo) return request(`/posts/${id}`);
     const p = posts.find((p) => p.id === id);
     if (!p) throw new ApiError("找不到這筆資料。", 404);
-    return { ...p, is_owner: p.user_id === user?.id };
+    return { ...demoPost(p), is_owner: p.user_id === user?.id };
   },
   async save(data, id) {
     if (!isDemo)
@@ -193,19 +244,25 @@ export const api = {
     if (!user) throw new ApiError("請先登入。", 401);
     if (id) {
       const p = owned(id);
+      if (data.status && data.status !== p.status) {
+        p.returned_at =
+          data.status === "returned" ? new Date().toISOString() : null;
+      }
       Object.assign(p, data);
-      return { ...p, is_owner: true };
+      return { ...demoPost(p), is_owner: true };
     }
     const p = {
       ...data,
       id: nextId++,
       user_id: user.id,
       author_name: user.display_name,
-      contact: data.contact || user.contact,
+      author_username: user.username,
+      contact: data.contact?.trim() || null,
       status: "open",
+      returned_at: null,
     };
     posts.unshift(p);
-    return { ...p, is_owner: true };
+    return { ...demoPost(p), is_owner: true };
   },
   async remove(id) {
     if (!isDemo) return request(`/posts/${id}`, "DELETE");

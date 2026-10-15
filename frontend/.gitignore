@@ -1,4 +1,5 @@
 node_modules/
+.vite/
 dist/
 .env
 .env.*
@@ -7,3 +8,4 @@ deploy/*.local.conf
 test-results/
 playwright-report/
 .playwright-cli/
+output/playwright/

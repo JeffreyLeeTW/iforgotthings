@@ -822,6 +822,7 @@ footer > span:last-child {
   gap: 25px;
 }
 .detail-image {
+  position: relative;
   border-radius: 9px;
   overflow: hidden;
   min-height: 250px;
@@ -1371,6 +1372,82 @@ dd {
 }
 .mobile-nav {
   display: none;
+}
+.contact-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.password-field {
+  margin: 0 0 16px;
+}
+.password-input {
+  position: relative;
+}
+.modal .password-input input {
+  padding-right: 48px;
+}
+.password-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+.password-section {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 12px 0 20px;
+}
+.password-section legend {
+  font-size: 14px;
+  font-weight: 600;
+}
+.account-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  padding: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.return-stamp {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: #233d72;
+  color: #fff;
+  border-radius: 6px;
+  text-align: left;
+  pointer-events: none;
+}
+.return-stamp strong,
+.return-stamp time,
+.return-stamp span {
+  display: block;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.return-stamp strong {
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .account-button span {
+    display: none;
+  }
 }
 @media (max-width: 800px) {
   .mobile-nav {

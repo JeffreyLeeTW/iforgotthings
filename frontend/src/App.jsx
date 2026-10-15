@@ -21,9 +21,13 @@ import {
   BookOpen,
   Umbrella,
   Shapes,
+  UserRound,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { api, categories, isDemo } from "./api";
 import ItemArt from "./ItemArt";
+import { studentIdError, apiDate } from "./validation";
 const icons = {
   id_card: CreditCard,
   electronics: Headphones,
@@ -42,6 +46,174 @@ const date = (value) =>
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
+function ReturnStamp({ post }) {
+  if (post.status !== "returned") return null;
+  const valid =
+    post.returned_at && !Number.isNaN(apiDate(post.returned_at).getTime());
+  return (
+    <div className="return-stamp">
+      <Check size={16} />
+      <div>
+        <strong>已歸還</strong>
+        {valid ? (
+          <time dateTime={post.returned_at}>
+            {new Intl.DateTimeFormat("zh-TW", {
+              timeZone: "Asia/Taipei",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              hour12: false,
+            }).format(apiDate(post.returned_at))}
+          </time>
+        ) : (
+          <span>未記錄歸還時間</span>
+        )}
+      </div>
+    </div>
+  );
+}
+function ContactField({ defaultValue, required = false }) {
+  return (
+    <label>
+      聯絡方式{required ? " *" : ""}
+      <textarea
+        name="contact"
+        rows={3}
+        maxLength={100}
+        required={required}
+        defaultValue={defaultValue}
+        placeholder={"Email：name@example.com\nLINE：你的 ID"}
+      />
+      <span className="small muted">
+        可換行填寫多種聯絡方式，每行一種，共 100 字以內。
+      </span>
+    </label>
+  );
+}
+function PasswordField({ name, label = "密碼", autoComplete, minLength = 6 }) {
+  const [visible, setVisible] = useState(false);
+  const id = useId();
+  return (
+    <div className="password-field">
+      <label htmlFor={id}>{label}</label>
+      <div className="password-input">
+        <input
+          id={id}
+          name={name}
+          type={visible ? "text" : "password"}
+          autoComplete={autoComplete}
+          required
+          minLength={minLength}
+          placeholder={minLength === 6 ? "至少 6 個字元" : "輸入目前密碼"}
+        />
+        <button
+          type="button"
+          className="password-toggle"
+          aria-label={`${visible ? "隱藏" : "顯示"}${label}`}
+          aria-pressed={visible}
+          onClick={() => setVisible((v) => !v)}
+        >
+          {visible ? <EyeOff size={18} /> : <Eye size={18} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+function Account({ user, onClose, onSaved }) {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [changePassword, setChangePassword] = useState(false);
+  async function submit(e) {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.currentTarget));
+    if (!data.display_name.trim() || !data.contact.trim()) {
+      setError("請填寫顯示名稱與聯絡方式。");
+      return;
+    }
+    if (changePassword && data.new_password !== data.confirm_password) {
+      setError("兩次輸入的新密碼不一致。");
+      return;
+    }
+    delete data.confirm_password;
+    setBusy(true);
+    setError("");
+    try {
+      onSaved(await api.updateProfile(data));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title="帳號管理" onClose={onClose}>
+      <p className="muted">更新大家看到的名稱與聯絡方式。</p>
+      <form onSubmit={submit}>
+        <label>
+          帳號
+          <input value={user.username} readOnly />
+        </label>
+        <label>
+          顯示名稱 *
+          <input
+            name="display_name"
+            required
+            maxLength={50}
+            defaultValue={user.display_name}
+          />
+        </label>
+        <ContactField required defaultValue={user.contact} />
+        <p className="small muted">
+          使用帳號聯絡方式的刊登會同步更新；個別填寫的貼文聯絡方式會保留。
+        </p>
+        <button
+          type="button"
+          className="text-button"
+          aria-expanded={changePassword}
+          onClick={() => {
+            setChangePassword((v) => !v);
+            setError("");
+          }}
+        >
+          {changePassword ? "取消修改密碼" : "修改密碼"}
+        </button>
+        {changePassword && (
+          <fieldset className="password-section">
+            <legend>修改密碼</legend>
+            <PasswordField
+              name="current_password"
+              label="目前密碼"
+              autoComplete="current-password"
+              minLength={1}
+            />
+            <PasswordField
+              name="new_password"
+              label="新密碼"
+              autoComplete="new-password"
+            />
+            <PasswordField
+              name="confirm_password"
+              label="確認新密碼"
+              autoComplete="new-password"
+            />
+            <p className="small muted">儲存成功後，下次請使用新密碼登入。</p>
+          </fieldset>
+        )}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="primary full" disabled={busy}>
+          {busy ? "正在儲存…" : "儲存個人資訊"}
+        </button>
+      </form>
+    </Modal>
+  );
+}
 function Modal({ title, onClose, children, wide = false }) {
   const ref = useRef();
   const titleId = useId();
@@ -98,12 +270,23 @@ function Auth({ onClose, onSuccess }) {
     [busy, setBusy] = useState(false);
   async function submit(e) {
     e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.currentTarget));
+    data.username = data.username.trim();
+    if (mode === "register") {
+      const invalid = studentIdError(data.username);
+      if (invalid) {
+        setError(invalid);
+        return;
+      }
+      if (!data.display_name.trim() || !data.contact.trim()) {
+        setError("請填寫顯示名稱與聯絡方式。");
+        return;
+      }
+    }
     setBusy(true);
     setError("");
     try {
-      onSuccess(
-        await api.auth(mode, Object.fromEntries(new FormData(e.currentTarget))),
-      );
+      onSuccess(await api.auth(mode, data));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -138,29 +321,27 @@ function Auth({ onClose, onSuccess }) {
       </div>
       <form onSubmit={submit}>
         <label>
-          帳號
+          {mode === "register" ? "中央大學學號" : "帳號"}
           <input
             name="username"
             autoComplete="username"
             required
-            pattern="[A-Za-z0-9]{3,20}"
-            title="3–20 個英文字母或數字"
-            placeholder="學號或 3–20 個英數字"
-          />
-        </label>
-        <label>
-          密碼
-          <input
-            type="password"
-            name="password"
-            autoComplete={
-              mode === "login" ? "current-password" : "new-password"
+            inputMode={mode === "register" ? "numeric" : "text"}
+            placeholder={
+              mode === "register" ? "9 碼學號，例如 115423047" : "輸入登入帳號"
             }
-            required
-            minLength={6}
-            placeholder="至少 6 個字元"
           />
         </label>
+        {mode === "register" && (
+          <p className="small muted">
+            學號須符合入學學年度、學院及學制代碼規則。
+          </p>
+        )}
+        <PasswordField
+          key={mode}
+          name="password"
+          autoComplete={mode === "login" ? "current-password" : "new-password"}
+        />
         {mode === "register" && (
           <>
             <label>
@@ -168,17 +349,11 @@ function Auth({ onClose, onSuccess }) {
               <input
                 name="display_name"
                 required
+                maxLength={50}
                 placeholder="想讓大家怎麼稱呼你？"
               />
             </label>
-            <label>
-              聯絡方式
-              <input
-                name="contact"
-                required
-                placeholder="例如 Email 或 LINE ID"
-              />
-            </label>
+            <ContactField required />
             <p className="small muted">
               刊登物品時，聯絡方式會公開給訪客查看。
             </p>
@@ -342,15 +517,20 @@ function Editor({ post, user, onClose, onSaved }) {
               placeholder="例如：圖書館櫃檯"
             />
           </label>
-          <label>
-            聯絡方式
-            <input
-              name="contact"
-              defaultValue={post?.contact || user.contact}
-              placeholder="未填則使用帳號聯絡方式"
-            />
-          </label>
         </div>
+        <ContactField
+          defaultValue={
+            post
+              ? post.contact_override !== undefined
+                ? post.contact_override || ""
+                : post.contact
+              : ""
+          }
+        />
+        <p className="small muted">
+          留白會使用帳號聯絡方式：
+          <span className="contact-text">{user.contact}</span>
+        </p>
         <p className="small muted">
           聯絡方式將公開。請避免拍攝完整證件號碼或其他個人資料。
         </p>
@@ -517,7 +697,14 @@ export default function App() {
         <div className="header-actions">
           {user ? (
             <>
-              <span className="username">{user.display_name}</span>
+              <button
+                className="account-button"
+                onClick={() => setModal("account")}
+                aria-label="帳號管理"
+              >
+                <UserRound size={18} />
+                <span>帳號管理</span>
+              </button>
               <button
                 className="icon-button"
                 aria-label="登出"
@@ -760,6 +947,7 @@ export default function App() {
                 >
                   <div className={`item-image tone-${post.category}`}>
                     <Photo post={post} />
+                    <ReturnStamp post={post} />
                     <span
                       className={`badge ${post.status === "returned" ? "returned" : ""}`}
                     >
@@ -853,6 +1041,18 @@ export default function App() {
           }}
         />
       )}
+      {modal === "account" && user && (
+        <Account
+          user={user}
+          onClose={close}
+          onSaved={(u) => {
+            setUser(u);
+            setVersion((v) => v + 1);
+            close();
+            setNotice("個人資訊已更新。");
+          }}
+        />
+      )}
       {(modal === "editor" || modal === "edit") && (
         <Editor
           user={user}
@@ -877,6 +1077,7 @@ export default function App() {
                 <div className="detail-layout">
                   <div className={`detail-image tone-${detail.category}`}>
                     <Photo post={detail} />
+                    <ReturnStamp post={detail} />
                   </div>
                   <div>
                     <span className="category-label">
@@ -906,7 +1107,7 @@ export default function App() {
                       ? "這件物品已歸還"
                       : "聯絡拾獲者，確認認領方式"}
                   </h3>
-                  <p>{detail.contact}</p>
+                  <p className="contact-text">{detail.contact}</p>
                   <small>請描述物品特徵，協助拾獲者確認你是主人。</small>
                 </div>
                 {detail.is_owner && (
